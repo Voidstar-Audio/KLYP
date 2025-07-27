@@ -13,6 +13,9 @@ pkgs.callPackage (
       cargo
       pkg-config
       python314
+      typst
+      typstyle
+      tinymist
     ];
     buildInputs = with pkgs; [
       wayland
