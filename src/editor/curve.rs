@@ -2,6 +2,7 @@ use core::slice;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use crate::editor::RangePreset;
 use crate::transfer;
 
 use super::Data;
@@ -12,15 +13,21 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::util::{remap_current_entity_y_coordinate, ModifiersExt};
 
 #[derive(Lens)]
-pub struct ClippingCurve {
+pub struct ClippingCurve<R: Lens<Target = RangePreset>> {
     dragging: bool,
     bold: Arc<AtomicBool>,
     scrolled_lines: f32,
     softness_param_base: ParamWidgetBase,
     threshold_param_base: ParamWidgetBase,
+    range: R,
 }
 
-impl View for ClippingCurve {
+fn remap<R: Lens<Target = RangePreset>>(cx: &EventContext, y_coord: f32, range: R) -> f32 {
+    let size = range.get(cx).raw_scalar();
+    1. - remap_current_entity_y_coordinate(cx, y_coord) * size + (size - 1.0)
+}
+
+impl<R: Lens<Target = RangePreset>> View for ClippingCurve<R> {
     fn element(&self) -> Option<&'static str> {
         Some("22-clipping-curve")
     }
@@ -28,7 +35,7 @@ impl View for ClippingCurve {
         event.map(|window_event, meta| match window_event {
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
-                let mouse_value = 1. - remap_current_entity_y_coordinate(cx, cx.mouse().cursory);
+                let mouse_value = remap(cx, cx.mouse().cursory, self.range);
                 let actual_value = self.threshold_param_base.unmodulated_plain_value();
 
                 if (actual_value - mouse_value).abs() > 0.15 {
@@ -57,7 +64,7 @@ impl View for ClippingCurve {
                     self.threshold_param_base.begin_set_parameter(cx);
                     // self.threshold_param_base.set_normalized_value(
                     //     cx,
-                    //     1. - remap_current_entity_y_coordinate(cx, cx.mouse().cursory),
+                    //     1. - remap(cx, cx.mouse().cursory),
                     // );
                 }
                 meta.consume();
@@ -82,10 +89,10 @@ impl View for ClippingCurve {
                 if self.dragging {
                     let value = self
                         .threshold_param_base
-                        .preview_normalized(1. - remap_current_entity_y_coordinate(cx, *y));
+                        .preview_normalized(remap(cx, *y, self.range));
                     self.threshold_param_base.set_normalized_value(cx, value);
                 } else {
-                    let mouse_value = 1. - remap_current_entity_y_coordinate(cx, *y);
+                    let mouse_value = remap(cx, *y, self.range);
                     let actual_value = self.threshold_param_base.unmodulated_plain_value();
 
                     self.bold.store(
@@ -136,8 +143,8 @@ impl View for ClippingCurve {
     }
 }
 
-impl ClippingCurve {
-    pub fn new(cx: &mut Context, bus: Arc<MonoBus>, decay: f32) -> Handle<Self> {
+impl<R: Lens<Target = RangePreset>> ClippingCurve<R> {
+    pub fn new(cx: &mut Context, bus: Arc<MonoBus>, decay: f32, range: R) -> Handle<Self> {
         let bold = Arc::new(AtomicBool::new(false));
         Self {
             bold: bold.clone(),
@@ -147,6 +154,7 @@ impl ClippingCurve {
                 &params.threshold
             }),
             scrolled_lines: 0.0,
+            range,
         }
         .build(cx, move |cx| {
             let mut accumulator = PeakAccumulator::new(1.0, decay);
@@ -183,6 +191,7 @@ impl ClippingCurve {
                                         gain: gain.make_lens(|p| p.value()),
                                         threshold: threshold.make_lens(|p| p.value()),
                                         softness: softness.make_lens(|p| p.value()),
+                                        range,
                                         bold: bold.clone(),
                                         bus,
                                         accumulator,
@@ -199,27 +208,30 @@ impl ClippingCurve {
     }
 }
 
-struct InnerCurve<G, T, S, A>
+struct InnerCurve<G, T, S, R, A>
 where
     G: Lens<Target = f32>,
     T: Lens<Target = f32>,
     S: Lens<Target = f32>,
+    R: Lens<Target = RangePreset>,
     A: Accumulator + 'static,
 {
     gain: G,
     threshold: T,
     softness: S,
+    range: R,
     bold: Arc<AtomicBool>,
     bus: Arc<MonoBus>,
     accumulator: Arc<Mutex<A>>,
     dispatcher_handle: Arc<dyn Fn(slice::Iter<f32>)>,
 }
 
-impl<G, T, S, A> View for InnerCurve<G, T, S, A>
+impl<G, T, S, R, A> View for InnerCurve<G, T, S, R, A>
 where
     G: Lens<Target = f32>,
     T: Lens<Target = f32>,
     S: Lens<Target = f32>,
+    R: Lens<Target = RangePreset>,
     A: Accumulator + 'static,
 {
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
@@ -227,12 +239,18 @@ where
 
         let threshold = self.threshold.get(cx);
         let softness = self.softness.get(cx);
+        let range = self.range.get(cx);
+
+        let size = range.raw_scalar();
+
         let bounds = cx.bounds();
 
         let x = bounds.x;
         let y = bounds.y;
         let w = bounds.w;
         let h = bounds.h;
+
+        let offset = (1.0 - 1.0 / size) * h;
 
         let line_width = cx.scale_factor();
 
@@ -252,48 +270,45 @@ where
             &vg::Paint::color(vg::Color::rgb(219, 221, 229)).with_line_width(line_width),
         );
 
-        static NUM_DOTS: usize = 8;
-
         // Dots
         canvas.fill_path(
             &{
                 let mut path = vg::Path::new();
 
-                (0..=NUM_DOTS)
-                    .flat_map(move |a| (0..=NUM_DOTS).map(move |b| (a, b)))
+                (0..=8)
+                    .flat_map(move |a| (0..=8).map(move |b| (a, b)))
                     .for_each(|(dx, dy)| {
-                        path.circle(
-                            x + dx as f32 / NUM_DOTS as f32 * w,
-                            y + dy as f32 / NUM_DOTS as f32 * w,
-                            line_width,
-                        )
+                        path.circle(x + dx as f32 / 8.0 * w, y + dy as f32 / 8.0 * w, line_width)
                     });
                 path
             },
             &vg::Paint::color(vg::Color::rgb(138, 141, 150)),
         );
 
+        let h = h / size;
+        let w_scaled = w / size;
+
         // Clipping Curve
 
         let in_peak = self.accumulator.lock().unwrap().prev();
-        let limit = ((w.ceil() + padding_scaled) * in_peak) as u32;
+        let limit = ((w_scaled.ceil() + padding_scaled) * in_peak) as u32;
 
         let mut clipping_curve = vg::Path::new();
 
-        clipping_curve.move_to(x, y + h);
+        clipping_curve.move_to(x, y + h + offset);
 
         (0..limit).for_each(|i| {
             clipping_curve.line_to(
                 x + i as f32,
-                y + h * (1.0 - transfer(i as f32 / w, threshold, softness)),
+                y + h * (1.0 - transfer(i as f32 / w_scaled, threshold, softness)) + offset,
             )
         });
 
         let filled_portion = clipping_curve.clone();
-        (limit..(w.ceil() + padding_scaled) as u32).for_each(|i| {
+        (limit..(w_scaled.ceil() + padding_scaled) as u32).for_each(|i| {
             clipping_curve.line_to(
                 x + i as f32,
-                y + h * (1.0 - transfer(i as f32 / w, threshold, softness)),
+                y + h * (1.0 - transfer(i as f32 / w_scaled, threshold, softness)) + offset,
             )
         });
 
@@ -308,8 +323,8 @@ where
 
         let red = vg::Color::rgb(208, 10, 10);
 
-        let top = y + (1.0 - threshold) * h;
-        let bottom = y + (1.0 - threshold * (1.0 - softness)) * h;
+        let top = y + (1.0 - threshold) * h + offset;
+        let bottom = y + (1.0 - threshold * (1.0 - softness)) * h + offset;
 
         let bold = self.bold.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -322,8 +337,7 @@ where
 
                 path
             },
-            &vg::Paint::color(red)
-                .with_line_width(line_width * if bold { 2.0 } else { 1.0 }),
+            &vg::Paint::color(red).with_line_width(line_width * if bold { 2.0 } else { 1.0 }),
         );
 
         if bottom - top >= 1.0 {
@@ -338,7 +352,7 @@ where
 
                     path
                 },
-                &vg::Paint::color(vg::Color{a: 0.25, ..red}),
+                &vg::Paint::color(vg::Color { a: 0.25, ..red }),
             );
         }
     }

@@ -5,9 +5,8 @@ use astra::prelude::*;
 use curve::ClippingCurve;
 use cyma::prelude::*;
 use nih_plug::params::Param;
-use nih_plug::prelude::Editor;
+use nih_plug::prelude::{Editor, Enum};
 use nih_plug::util::db_to_gain;
-use nih_plug_vizia::vizia::icons::ICON_CHEVRON_DOWN;
 use nih_plug_vizia::vizia::{image, prelude::*};
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
@@ -16,12 +15,73 @@ use threshold_lines::ThresholdLines;
 
 use crate::KlypParams;
 
+#[derive(Enum, Default, Clone)]
+pub enum RangePreset {
+    #[name = "0 dB"]
+    #[default]
+    A,
+    #[name = "6 dB"]
+    B,
+    #[name = "12 dB"]
+    C,
+}
+impl RangePreset {
+    pub fn raw_scalar(&self) -> f32 {
+        match self {
+            Self::A => 1.0,
+            Self::B => 2.0,
+            Self::C => 4.0,
+        }
+    }
+    fn to_range(&self) -> (f32, f32) {
+        let max = self.raw_scalar() * (400.0 / (400.0 - 24.0));
+        (-max, max)
+    }
+}
+
+#[derive(Enum, Default, Clone)]
+pub enum DurationPreset {
+    #[name = "1s"]
+    A,
+    #[name = "2s"]
+    B,
+    #[default]
+    #[name = "5s"]
+    C,
+    #[name = "10s"]
+    D,
+}
+impl DurationPreset {
+    fn to_duration(&self) -> f32 {
+        match self {
+            Self::A => 1.0,
+            Self::B => 2.0,
+            Self::C => 5.0,
+            Self::D => 10.0,
+        }
+    }
+}
+
 #[derive(Lens)]
 pub struct Data {
     params: Arc<KlypParams>,
+    range: RangePreset,
+    duration: DurationPreset,
 }
 
-impl Model for Data {}
+impl Model for Data {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|editor_event, _| match editor_event {
+            EditorEvent::UpdateRange(i) => self.range = RangePreset::from_index(*i),
+            EditorEvent::UpdateDuration(i) => self.duration = DurationPreset::from_index(*i),
+        });
+    }
+}
+
+pub enum EditorEvent {
+    UpdateRange(usize),
+    UpdateDuration(usize),
+}
 
 pub(crate) fn default_state() -> Arc<ViziaState> {
     ViziaState::new(|| (640, 400))
@@ -55,15 +115,19 @@ pub(crate) fn create(
             "#,
         );
 
+        const MAX_RANGE: f32 = 400.0 / (400.0 - 24.0);
+
         Data {
             params: params.clone(),
+            range: Default::default(),
+            duration: Default::default(),
         }
         .build(cx);
 
         HStack::new(cx, |cx| {
             VStack::new(cx, |cx| {
                 ZStack::new(cx, |cx| {
-                    ClippingCurve::new(cx, pre.clone(), 300.0);
+                    ClippingCurve::new(cx, pre.clone(), 300.0, Data::range);
                     Dropdown::new(
                         cx,
                         |cx| {
@@ -95,7 +159,7 @@ pub(crate) fn create(
                                     Label::new(cx, "OVERSAMPLING")
                                         .top(Stretch(1.0))
                                         .bottom(Stretch(1.0));
-                                    Selector::new(cx, Data::params, |p| {
+                                    ParamSelector::new(cx, Data::params, |p| {
                                         &p.antialiasing.oversampling
                                     })
                                     .top(Stretch(1.0))
@@ -135,8 +199,8 @@ pub(crate) fn create(
                     .left(Stretch(1.0))
                     .top(Stretch(1.0));
                 })
-                .child_space(Pixels(12.0))
-                .size(Pixels(212.0));
+                .size(Pixels(212.0))
+                .child_space(Pixels(12.0));
                 hdivider(cx);
                 VStack::new(cx, |cx| {
                     ParamSlider::new(
@@ -235,43 +299,49 @@ pub(crate) fn create(
             .width(Auto);
             vdivider(cx);
             ZStack::new(cx, |cx| {
-                let range = 400.0 / (400.0 - 24.0);
-                const DURATION: f32 = 5.0;
                 const TICKS: usize = 2;
                 Oscilloscope::new(
                     cx,
                     post.clone(),
-                    DURATION,
-                    (-range, range),
+                    Data::duration.map(|d| d.to_duration()),
+                    Data::range.map(|r| r.to_range()),
                     ValueScaling::Linear,
                 );
                 Oscilloscope::new(
                     cx,
                     pre.clone(),
-                    DURATION,
-                    (-range, range),
+                    Data::duration.map(|d| d.to_duration()),
+                    Data::range.map(|r| r.to_range()),
                     ValueScaling::Linear,
                 )
                 .class("overlay");
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    (-range, range),
+                    RangePreset::A.to_range(),
                     (-8..=8).map(|x| x as f32 / 8.0).collect::<Vec<_>>(),
                     Orientation::Horizontal,
                 );
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    (-range, range),
+                    RangePreset::A.to_range(),
                     vec![1.0, 0.75, 0.5, 0.25, 0.0, -0.25, -0.5, -0.75, -1.0],
                     Orientation::Horizontal,
                 );
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    (0.0, DURATION),
-                    (0..=DURATION.ceil() as usize * TICKS)
+                    Data::range.map(|r| r.to_range()),
+                    vec![1.0, -1.0],
+                    Orientation::Horizontal,
+                )
+                .opacity(0.2);
+                Grid::new(
+                    cx,
+                    ValueScaling::Linear,
+                    Data::duration.map(|r| (0.0, r.to_duration())),
+                    (0..=10 * TICKS)
                         .map(|x| x as f32 / TICKS as f32)
                         .collect::<Vec<_>>(),
                     Orientation::Vertical,
@@ -279,36 +349,118 @@ pub(crate) fn create(
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    (0.0, DURATION),
-                    (0..=DURATION.ceil() as usize)
-                        .map(|x| x as f32)
-                        .collect::<Vec<_>>(),
+                    Data::duration.map(|r| (0.0, r.to_duration())),
+                    (0..=10).map(|x| x as f32).collect::<Vec<_>>(),
                     Orientation::Vertical,
                 );
-                ThresholdLines::new(cx)
+                ThresholdLines::new(cx, Data::range)
                     .color("fg-red")
                     .top(Pixels(12.0))
                     .bottom(Pixels(12.0));
-                UnitRuler::new(
+                Binding::new(
                     cx,
-                    (-range, range),
-                    ValueScaling::Linear,
-                    vec![
-                        (1.00, "0.0 dB"),
-                        (0.75, "-2.5 dB"),
-                        (0.50, "-6.0 dB"),
-                        (0.25, "-12.0 dB"),
-                        (0.00, "-INF dB"),
-                        (-0.25, "-12.0 dB"),
-                        (-0.50, "-6.0 dB"),
-                        (-0.75, "-2.5 dB"),
-                        (-1.00, "0.0 dB"),
-                    ],
-                    Orientation::Vertical,
+                    Data::range.map(|r| r.clone().to_index()),
+                    |cx, range| {
+                        let range = RangePreset::from_index(range.get(cx));
+
+                        let ticks = match range {
+                            RangePreset::A => vec![
+                                (1.00, "0.0 dB"),
+                                (0.75, "-2.5 dB"),
+                                (0.50, "-6.0 dB"),
+                                (0.25, "-12.0 dB"),
+                                (0.00, "-INF dB"),
+                                (-0.25, "-12.0 dB"),
+                                (-0.50, "-6.0 dB"),
+                                (-0.75, "-2.5 dB"),
+                                (-1.00, "0.0 dB"),
+                            ],
+                            RangePreset::B => vec![
+                                (2.00, "6.0 dB"),
+                                (1.50, "3.5 dB"),
+                                (1.00, "0.0 dB"),
+                                (0.50, "-6.0 dB"),
+                                (0.00, "-INF dB"),
+                                (-0.50, "-6.0 dB"),
+                                (-1.00, "0.0 dB"),
+                                (-1.50, "3.5 dB"),
+                                (-2.00, "6.0 dB"),
+                            ],
+                            RangePreset::C => vec![
+                                (4.00, "12.0 dB"),
+                                (3.00, "9.5 dB"),
+                                (2.00, "6.0 dB"),
+                                (1.00, "0.0 dB"),
+                                (0.00, "-INF dB"),
+                                (-1.00, "0.0 dB"),
+                                (-2.00, "6.0 dB"),
+                                (-3.00, "9.5 dB"),
+                                (-4.00, "12.0 dB"),
+                            ],
+                        };
+
+                        UnitRuler::new(
+                            cx,
+                            range.to_range(),
+                            ValueScaling::Linear,
+                            ticks,
+                            Orientation::Vertical,
+                        )
+                        .left(Stretch(1.0))
+                        .width(Pixels(32.0))
+                        .right(Pixels(4.0));
+                    },
+                );
+                Dropdown::new(
+                    cx,
+                    |cx| {
+                        HStack::new(cx, |cx| {
+                            Label::new(
+                                cx,
+                                Data::duration
+                                    .map(|r| DurationPreset::variants()[r.clone().to_index()]),
+                            )
+                            .pointer_events(false);
+                            Label::new(cx, ", ").pointer_events(false);
+                            Label::new(
+                                cx,
+                                Data::range.map(|r| RangePreset::variants()[r.clone().to_index()]),
+                            )
+                            .width(Stretch(1.0))
+                            .pointer_events(false);
+                            Image::new(cx, "chevron_down.png").pointer_events(false);
+                        })
+                    },
+                    |cx| {
+                        VStack::new(cx, |cx| {
+                            HStack::new(cx, |cx| {
+                                Label::new(cx, "RANGE")
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
+                                Selector::new(cx, Data::range)
+                                    .on_toggle(|cx, i| cx.emit(EditorEvent::UpdateRange(i)));
+                            })
+                            .height(Auto)
+                            .col_between(Stretch(1.0));
+                            HStack::new(cx, |cx| {
+                                Label::new(cx, "DURATION")
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
+                                Selector::new(cx, Data::duration)
+                                    .on_toggle(|cx, i| cx.emit(EditorEvent::UpdateDuration(i)));
+                            })
+                            .height(Auto)
+                            .col_between(Stretch(1.0));
+                        })
+                        .child_space(Pixels(8.0))
+                        .row_between(Pixels(4.0))
+                        .height(Auto);
+                    },
                 )
-                .left(Stretch(1.0))
-                .width(Pixels(32.0))
-                .right(Pixels(4.0));
+                .class("vis")
+                .width(Pixels(80.0))
+                .left(Pixels(12.0))
+                .top(Pixels(12.0));
             })
             .class("bg-elevated");
         });

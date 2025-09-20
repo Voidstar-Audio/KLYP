@@ -1,11 +1,9 @@
+use crate::editor::RangePreset;
+
 use super::Data;
-use nih_plug::nih_dbg;
 use nih_plug_vizia::{
     vizia::{prelude::*, vg},
-    widgets::{
-        param_base::ParamWidgetBase,
-        util::{remap_current_entity_y_coordinate, ModifiersExt},
-    },
+    widgets::param_base::ParamWidgetBase,
 };
 
 pub struct ThresholdLines {
@@ -120,7 +118,7 @@ impl View for ThresholdLines {
 }
 
 impl ThresholdLines {
-    pub fn new(cx: &mut Context) -> Handle<Self> {
+    pub fn new(cx: &mut Context, range: impl Lens<Target = RangePreset>) -> Handle<Self> {
         Self {
             dragging: false,
             softness_param_base: ParamWidgetBase::new(cx, Data::params, |params| &params.softness),
@@ -143,6 +141,7 @@ impl ThresholdLines {
                             Lines {
                                 threshold: threshold.make_lens(|p| p.value()),
                                 softness: softness.make_lens(|p| p.value()),
+                                range,
                             }
                             .build(cx, |_| {});
                         },
@@ -153,22 +152,26 @@ impl ThresholdLines {
     }
 }
 
-struct Lines<T, S>
+struct Lines<T, S, R>
 where
     T: Lens<Target = f32>,
     S: Lens<Target = f32>,
+    R: Lens<Target = RangePreset>,
 {
     threshold: T,
     softness: S,
+    range: R,
 }
 
-impl<T, S> View for Lines<T, S>
+impl<T, S, R> View for Lines<T, S, R>
 where
     T: Lens<Target = f32>,
     S: Lens<Target = f32>,
+    R: Lens<Target = RangePreset>,
 {
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        let threshold = self.threshold.get(cx);
+        let size = self.range.get(cx).raw_scalar();
+        let threshold = self.threshold.get(cx) / size;
         let softness = self.softness.get(cx);
 
         let bounds = cx.bounds();

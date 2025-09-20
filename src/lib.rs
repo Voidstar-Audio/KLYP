@@ -295,7 +295,7 @@ impl Plugin for Klyp {
             self.post.send_buffer_summing(buffer);
         }
 
-        ProcessStatus::Normal
+        return ProcessStatus::Normal;
     }
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
