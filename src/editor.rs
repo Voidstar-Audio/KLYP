@@ -112,6 +112,9 @@ pub(crate) fn create(
                 dropdown > popup {
                     width: 188px;
                 }
+                dropdown.vis popup {
+                    top: -57px;
+                }
             "#,
         );
 
@@ -417,14 +420,14 @@ pub(crate) fn create(
                         HStack::new(cx, |cx| {
                             Label::new(
                                 cx,
-                                Data::duration
-                                    .map(|r| DurationPreset::variants()[r.clone().to_index()]),
+                                Data::range.map(|r| RangePreset::variants()[r.clone().to_index()]),
                             )
                             .pointer_events(false);
-                            Label::new(cx, ", ").pointer_events(false);
+                            Label::new(cx, "  ").pointer_events(false);
                             Label::new(
                                 cx,
-                                Data::range.map(|r| RangePreset::variants()[r.clone().to_index()]),
+                                Data::duration
+                                    .map(|r| DurationPreset::variants()[r.clone().to_index()]),
                             )
                             .width(Stretch(1.0))
                             .pointer_events(false);
@@ -458,9 +461,11 @@ pub(crate) fn create(
                     },
                 )
                 .class("vis")
+                .class("ghost")
                 .width(Pixels(80.0))
                 .left(Pixels(12.0))
-                .top(Pixels(12.0));
+                .top(Stretch(1.0))
+                .bottom(Pixels(12.0));
             })
             .class("bg-elevated");
         });
