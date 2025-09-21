@@ -318,6 +318,11 @@ pub(crate) fn create(
                     ValueScaling::Linear,
                 )
                 .class("overlay");
+                Element::new(cx)
+                    .height(Stretch(1.0))
+                    .width(Pixels(64.0))
+                    .left(Stretch(1.0))
+                    .class("fade-right");
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
@@ -467,7 +472,7 @@ pub(crate) fn create(
                 .top(Stretch(1.0))
                 .bottom(Pixels(12.0));
             })
-            .class("bg-elevated");
+            .class("bg-gray-50");
         });
     })
 }

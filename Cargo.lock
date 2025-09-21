@@ -278,7 +278,7 @@ dependencies = [
 [[package]]
 name = "astra"
 version = "0.1.0"
-source = "git+https://github.com/Voidstar-Audio/ASTRA#e0c5e46ceb62d16ba42f378cd0f6442c2f1e1da2"
+source = "git+https://github.com/Voidstar-Audio/ASTRA#7a8fd1fe16c8c7351798564676ee36ade47d07fc"
 dependencies = [
  "grass",
  "nih_plug",
