@@ -1,13 +1,14 @@
 mod antialiasing;
 mod editor;
 mod oversampling;
+mod preferences;
 
-use crate::antialiasing::Processor;
+use crate::{antialiasing::Processor, preferences::Preferences};
 use cyma::prelude::*;
 use nih_plug::{prelude::*, util::db_to_gain_fast};
 use nih_plug_vizia::ViziaState;
 use oversampling::Lanczos3Oversampler;
-use std::{f32::consts::PI, sync::Arc};
+use std::{f32::consts::PI, sync::{Arc, Mutex}};
 use util::MINUS_INFINITY_GAIN;
 
 const BLOCK_SIZE: usize = 32;
@@ -68,6 +69,7 @@ pub struct Klyp {
     processors: Vec<Processor>,
     oversamplers: Vec<Lanczos3Oversampler>,
     scratch_buffers: Box<ScratchBuffers>,
+    preferences: Arc<Mutex<Option<Preferences>>>
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
@@ -124,6 +126,7 @@ impl Default for Klyp {
             processors: vec![],
             oversamplers: vec![],
             scratch_buffers: Box::default(),
+            preferences: Default::default()
         }
     }
 }
@@ -326,6 +329,7 @@ impl Plugin for Klyp {
             self.params.editor_state.clone(),
             self.pre.clone(),
             self.post.clone(),
+            self.preferences.clone()
         )
     }
 

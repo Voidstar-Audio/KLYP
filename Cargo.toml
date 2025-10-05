@@ -21,8 +21,11 @@ dubble = "0.1.0"
 # thread in debug builds.
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs", "standalone"] }
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
-astra = { git = "https://github.com/Voidstar-Audio/ASTRA" }
-cyma = { git = "https://github.com/exa04/cyma" }
+astra = { git = "https://git.sr.ht/~voidstar-audio/ASTRA" }
+cyma = { git = "https://git.sr.ht/~voidstar-audio/CYMA" }
+serde = "1.0.228"
+serde_json = "1.0.145"
+platform-dirs = "0.3.0"
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 # nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["assert_process_allocs"] }

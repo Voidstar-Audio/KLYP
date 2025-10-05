@@ -10,18 +10,23 @@ use nih_plug::util::db_to_gain;
 use nih_plug_vizia::vizia::{image, prelude::*};
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use threshold_lines::ThresholdLines;
 
+use crate::preferences::{load_preferences, store_preferences, Preferences};
 use crate::KlypParams;
 
-#[derive(Enum, Default, Clone)]
+#[derive(Enum, Default, Clone, Serialize, Deserialize)]
 pub enum RangePreset {
     #[name = "0 dB"]
+    #[serde(rename = "0db")]
     #[default]
     A,
+    #[serde(rename = "6db")]
     #[name = "6 dB"]
     B,
+    #[serde(rename = "12db")]
     #[name = "12 dB"]
     C,
 }
@@ -39,15 +44,19 @@ impl RangePreset {
     }
 }
 
-#[derive(Enum, Default, Clone)]
+#[derive(Enum, Default, Clone, Serialize, Deserialize)]
 pub enum DurationPreset {
+    #[serde(rename = "1s")]
     #[name = "1s"]
     A,
+    #[serde(rename = "2s")]
     #[name = "2s"]
     B,
     #[default]
+    #[serde(rename = "5s")]
     #[name = "5s"]
     C,
+    #[serde(rename = "10s")]
     #[name = "10s"]
     D,
 }
@@ -64,16 +73,23 @@ impl DurationPreset {
 
 #[derive(Lens)]
 pub struct Data {
+    preferences: Arc<Mutex<Option<Preferences>>>,
     params: Arc<KlypParams>,
-    range: RangePreset,
-    duration: DurationPreset,
 }
 
 impl Model for Data {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|editor_event, _| match editor_event {
-            EditorEvent::UpdateRange(i) => self.range = RangePreset::from_index(*i),
-            EditorEvent::UpdateDuration(i) => self.duration = DurationPreset::from_index(*i),
+            EditorEvent::UpdateRange(i) => {
+                let mut preferences = self.preferences.lock().unwrap();
+                preferences.as_mut().unwrap().range_preset = RangePreset::from_index(*i);
+                store_preferences(&preferences.as_ref().unwrap());
+            },
+            EditorEvent::UpdateDuration(i) => {
+                let mut preferences = self.preferences.lock().unwrap();
+                preferences.as_mut().unwrap().duration_preset = DurationPreset::from_index(*i);
+                store_preferences(&preferences.as_ref().unwrap());
+            },
         });
     }
 }
@@ -92,7 +108,16 @@ pub(crate) fn create(
     editor_state: Arc<ViziaState>,
     pre: Arc<MonoBus>,
     post: Arc<MonoBus>,
+    plugin_preferences: Arc<Mutex<Option<Preferences>>>
 ) -> Option<Box<dyn Editor>> {
+    {
+        let prefs = &mut plugin_preferences.lock().unwrap();
+
+        if prefs.is_none() {
+            let _ = prefs.insert(load_preferences());
+        };
+    }
+
     create_vizia_editor(editor_state, ViziaTheming::None, move |cx, _| {
         let _ = apply_styles(cx);
         cx.load_image(
@@ -118,19 +143,17 @@ pub(crate) fn create(
             "#,
         );
 
-        const MAX_RANGE: f32 = 400.0 / (400.0 - 24.0);
 
         Data {
+            preferences: plugin_preferences.clone(),
             params: params.clone(),
-            range: Default::default(),
-            duration: Default::default(),
         }
         .build(cx);
 
         HStack::new(cx, |cx| {
             VStack::new(cx, |cx| {
                 ZStack::new(cx, |cx| {
-                    ClippingCurve::new(cx, pre.clone(), 300.0, Data::range);
+                    ClippingCurve::new(cx, pre.clone(), 300.0, Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.clone()));
                     Dropdown::new(
                         cx,
                         |cx| {
@@ -153,7 +176,7 @@ pub(crate) fn create(
                                         .pointer_events(false);
                                     },
                                 );
-                                Image::new(cx, "chevron_down.png").pointer_events(false);
+                                Image::new(cx, "chevron_down.png").pointer_events(false).width(Pixels(8.0)).height(Pixels(6.0));
                             })
                         },
                         |cx| {
@@ -194,8 +217,11 @@ pub(crate) fn create(
                                     },
                                 );
                             })
-                            .child_space(Pixels(8.0))
-                            .row_between(Pixels(4.0))
+                            .child_top(Pixels(4.0))
+                            .child_right(Pixels(4.0))
+                            .child_bottom(Pixels(4.0))
+                            .child_left(Pixels(6.0))
+                            .row_between(Pixels(2.0))
                             .height(Auto);
                         },
                     )
@@ -306,15 +332,15 @@ pub(crate) fn create(
                 Oscilloscope::new(
                     cx,
                     post.clone(),
-                    Data::duration.map(|d| d.to_duration()),
-                    Data::range.map(|r| r.to_range()),
+                    Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().duration_preset.to_duration()),
+                    Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.to_range()),
                     ValueScaling::Linear,
                 );
                 Oscilloscope::new(
                     cx,
                     pre.clone(),
-                    Data::duration.map(|d| d.to_duration()),
-                    Data::range.map(|r| r.to_range()),
+                    Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().duration_preset.to_duration()),
+                    Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.to_range()),
                     ValueScaling::Linear,
                 )
                 .class("overlay");
@@ -340,7 +366,7 @@ pub(crate) fn create(
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    Data::range.map(|r| r.to_range()),
+                    Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.to_range()),
                     vec![1.0, -1.0],
                     Orientation::Horizontal,
                 )
@@ -348,7 +374,7 @@ pub(crate) fn create(
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    Data::duration.map(|r| (0.0, r.to_duration())),
+                    Data::preferences.map(|p| (0.0, p.lock().unwrap().as_ref().unwrap().duration_preset.to_duration())),
                     (0..=10 * TICKS)
                         .map(|x| x as f32 / TICKS as f32)
                         .collect::<Vec<_>>(),
@@ -357,17 +383,17 @@ pub(crate) fn create(
                 Grid::new(
                     cx,
                     ValueScaling::Linear,
-                    Data::duration.map(|r| (0.0, r.to_duration())),
+                    Data::preferences.map(|p| (0.0, p.lock().unwrap().as_ref().unwrap().duration_preset.to_duration())),
                     (0..=10).map(|x| x as f32).collect::<Vec<_>>(),
                     Orientation::Vertical,
                 );
-                ThresholdLines::new(cx, Data::range)
+                ThresholdLines::new(cx, Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.clone()))
                     .color("fg-red")
                     .top(Pixels(12.0))
                     .bottom(Pixels(12.0));
                 Binding::new(
                     cx,
-                    Data::range.map(|r| r.clone().to_index()),
+                    Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.clone().to_index()),
                     |cx, range| {
                         let range = RangePreset::from_index(range.get(cx));
 
@@ -425,18 +451,17 @@ pub(crate) fn create(
                         HStack::new(cx, |cx| {
                             Label::new(
                                 cx,
-                                Data::range.map(|r| RangePreset::variants()[r.clone().to_index()]),
+                                Data::preferences.map(|p| RangePreset::variants()[p.lock().unwrap().as_ref().unwrap().range_preset.clone().to_index()]),
                             )
                             .pointer_events(false);
-                            Label::new(cx, "  ").pointer_events(false);
+                            Label::new(cx, ", ").pointer_events(false);
                             Label::new(
                                 cx,
-                                Data::duration
-                                    .map(|r| DurationPreset::variants()[r.clone().to_index()]),
+                                Data::preferences.map(|p| DurationPreset::variants()[p.lock().unwrap().as_ref().unwrap().duration_preset.clone().to_index()]),
                             )
                             .width(Stretch(1.0))
                             .pointer_events(false);
-                            Image::new(cx, "chevron_down.png").pointer_events(false);
+                            Image::new(cx, "chevron_down.png").pointer_events(false).width(Pixels(8.0)).height(Pixels(6.0));
                         })
                     },
                     |cx| {
@@ -445,7 +470,7 @@ pub(crate) fn create(
                                 Label::new(cx, "RANGE")
                                     .top(Stretch(1.0))
                                     .bottom(Stretch(1.0));
-                                Selector::new(cx, Data::range)
+                                Selector::new(cx, Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().range_preset.clone()))
                                     .on_toggle(|cx, i| cx.emit(EditorEvent::UpdateRange(i)));
                             })
                             .height(Auto)
@@ -454,14 +479,17 @@ pub(crate) fn create(
                                 Label::new(cx, "DURATION")
                                     .top(Stretch(1.0))
                                     .bottom(Stretch(1.0));
-                                Selector::new(cx, Data::duration)
+                                Selector::new(cx, Data::preferences.map(|p| p.lock().unwrap().as_ref().unwrap().duration_preset.clone()))
                                     .on_toggle(|cx, i| cx.emit(EditorEvent::UpdateDuration(i)));
                             })
                             .height(Auto)
                             .col_between(Stretch(1.0));
                         })
-                        .child_space(Pixels(8.0))
-                        .row_between(Pixels(4.0))
+                        .child_top(Pixels(4.0))
+                        .child_right(Pixels(4.0))
+                        .child_bottom(Pixels(4.0))
+                        .child_left(Pixels(6.0))
+                        .row_between(Pixels(2.0))
                         .height(Auto);
                     },
                 )
