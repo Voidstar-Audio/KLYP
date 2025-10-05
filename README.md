@@ -1,9 +1,3 @@
-# Klyp
+# This repository has been migrated to sourcehut.
 
-## Building
-
-After installing [Rust](https://rustup.rs/), you can compile Klyp as follows:
-
-```shell
-cargo xtask bundle klyp --release
-```
+### You can find it at [~voidstar-audio/KLYP](https://git.sr.ht/~voidstar-audio/KLYP)
